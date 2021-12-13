@@ -29,6 +29,8 @@ class REMODEL_dataset(Dataset):
         image_name = self.img_lst[idx]
         img = cv2.imread(os.path.join(self.dataset_dir, "img/subdir_required_by_keras", image_name))
         mask = cv2.imread(os.path.join(self.dataset_dir, "mask/subdir_required_by_keras", image_name))
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
         augmented = self.transforms(image=img, mask=mask)
         img = augmented['image']
         mask = augmented['mask'] / 255.0
@@ -57,8 +59,8 @@ class REMODEL_segmenter(pl.LightningModule):
         self.batch_size = batch_size
         self.lr = lr
 
-        self.net = smp.Unet('resnet18', encoder_weights='imagenet', activation='sigmoid', in_channels=1)
-        # self.net = smp.Unet('efficientnet-b0', encoder_weights='imagenet', activation='sigmoid', in_channels=1)
+        # self.net = smp.Unet('resnet18', encoder_weights='imagenet', activation='sigmoid', in_channels=1)
+        self.net = smp.Unet('efficientnet-b0')
         # self.net = smp.Unet('efficientnet-b3', encoder_weights='imagenet', activation='sigmoid', in_channels=1)
 
     def forward(self, x):
@@ -67,8 +69,12 @@ class REMODEL_segmenter(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         img, mask = batch
-        img = img.float().view(8, 1, 176, 256)
-        mask = mask.float().view(8, 1, 176, 256)
+        print("*****")
+        print(type(img))
+        img = img.float().view(-1, 3, 176, 256)
+        mask = mask.float().view(-1, 1, 176, 256)
+        # img = img.float()
+        # mask = mask.float()
         out = self(img)
         loss_val = F.binary_cross_entropy_with_logits(out, mask)
         log_dict = {'train_loss': loss_val}
@@ -76,8 +82,10 @@ class REMODEL_segmenter(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         img, mask = batch
-        img = img.float().view(8, 1, 176, 256)
-        mask = mask.float().view(8, 1, 176, 256)
+        img = img.float().view(-1, 3, 176, 256)
+        mask = mask.float().view(-1, 1, 176, 256)
+        # img = img.float()
+        # mask = mask.float()
         out = self(img)
         loss_val = F.binary_cross_entropy_with_logits(out, mask)
         val_dice = dice_coeff(out, mask)
