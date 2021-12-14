@@ -14,8 +14,7 @@ from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
 
 
 aug = Compose([
-    Resize(480, 640),
-    Normalize(mean=(0.485, 0.456, 0.406), std=(0.229, 0.224, 0.225)),
+    Resize(176, 256),
     ToTensorV2()
 ])
 
@@ -60,7 +59,9 @@ class REMODEL_segmenter(pl.LightningModule):
         self.batch_size = batch_size
         self.lr = lr
 
-        self.net = smp.Unet('efficientnet-b3', encoder_weights='imagenet', activation='sigmoid')
+        # self.net = smp.Unet('resnet18', encoder_weights='imagenet', activation='sigmoid', in_channels=1)
+        self.net = smp.Unet('efficientnet-b0')
+        # self.net = smp.Unet('efficientnet-b3', encoder_weights='imagenet', activation='sigmoid', in_channels=1)
 
     def forward(self, x):
         # return self.net(x)
@@ -68,8 +69,12 @@ class REMODEL_segmenter(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         img, mask = batch
-        img = img.float().view(-1, 3, 480, 640)
-        mask = mask.float().view(-1, 1, 480, 640)
+        print("*****")
+        print(type(img))
+        img = img.float().view(-1, 3, 176, 256)
+        mask = mask.float().view(-1, 1, 176, 256)
+        # img = img.float()
+        # mask = mask.float()
         out = self(img)
         loss_val = F.binary_cross_entropy_with_logits(out, mask)
         log_dict = {'train_loss': loss_val}
@@ -77,8 +82,10 @@ class REMODEL_segmenter(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         img, mask = batch
-        img = img.float().view(-1, 3, 480, 640)
-        mask = mask.float().view(-1, 1, 480, 640)
+        img = img.float().view(-1, 3, 176, 256)
+        mask = mask.float().view(-1, 1, 176, 256)
+        # img = img.float()
+        # mask = mask.float()
         out = self(img)
         loss_val = F.binary_cross_entropy_with_logits(out, mask)
         val_dice = dice_coeff(out, mask)
@@ -121,20 +128,20 @@ class REMODEL_segmenter(pl.LightningModule):
 
 
 if __name__ == '__main__':
-    # checkpoint_callback = ModelCheckpoint(
-    #     filepath='best_weights_{epoch:04d}-{dice:.5f}',
-    #     save_top_k=3,
-    #     verbose=True,
-    #     monitor='dice',
-    #     mode='max'
-    # )
+    checkpoint_callback = ModelCheckpoint(
+        dirpath='best_weights_{epoch:04d}-{dice:.5f}',
+        save_top_k=3,
+        verbose=True,
+        monitor='dice',
+        mode='max'
+    )
 
-    model = REMODEL_segmenter(data_path="D:\STUDIA\Magisterka\z_train", batch_size=4, lr=3e-4)
+    model = REMODEL_segmenter(data_path="skullstripper_data/z_train", batch_size=8, lr=3e-4)
     lr_logger = LearningRateMonitor()
     trainer = pl.Trainer(
         callbacks=[lr_logger],
-        # checkpoint_callback=checkpoint_callback,
-        max_epochs=10,
+        checkpoint_callback=checkpoint_callback,
+        max_epochs=50,
         gpus=1
     )
     trainer.fit(model)
