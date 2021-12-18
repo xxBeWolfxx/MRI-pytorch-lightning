@@ -59,8 +59,8 @@ class REMODEL_segmenter(pl.LightningModule):
         self.batch_size = batch_size
         self.lr = lr
 
-        self.net = smp.Unet('resnet18', encoder_weights='imagenet', activation='sigmoid', in_channels=1)
-        # self.net = smp.Unet('efficientnet-b0', encoder_weights='imagenet', activation='sigmoid', in_channels=1)
+        # self.net = smp.Unet('resnet18', encoder_weights='imagenet', activation='sigmoid', in_channels=1)
+        self.net = smp.Unet('efficientnet-b0')
         # self.net = smp.Unet('efficientnet-b3', encoder_weights='imagenet', activation='sigmoid', in_channels=1)
 
     def forward(self, x):
