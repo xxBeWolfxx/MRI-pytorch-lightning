@@ -14,7 +14,7 @@ from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
 
 
 aug = Compose([
-    Resize(192, 256),
+    Resize(176, 256),
     ToTensorV2()
 ])
 
@@ -29,8 +29,6 @@ class REMODEL_dataset(Dataset):
         image_name = self.img_lst[idx]
         img = cv2.imread(os.path.join(self.dataset_dir, "img/subdir_required_by_keras", image_name))
         mask = cv2.imread(os.path.join(self.dataset_dir, "mask/subdir_required_by_keras", image_name))
-        img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
         augmented = self.transforms(image=img, mask=mask)
         img = augmented['image']
         mask = augmented['mask'] / 255.0
@@ -69,8 +67,8 @@ class REMODEL_segmenter(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         img, mask = batch
-        img = img.float().view(-1, 1, 192, 256)
-        mask = mask.float().view(-1, 1, 192, 256)
+        img = img.float().view(8, 1, 176, 256)
+        mask = mask.float().view(8, 1, 176, 256)
         out = self(img)
         loss_val = F.binary_cross_entropy_with_logits(out, mask)
         log_dict = {'train_loss': loss_val}
@@ -78,13 +76,12 @@ class REMODEL_segmenter(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         img, mask = batch
-        img = img.float().view(-1, 1, 192, 256)
-        mask = mask.float().view(-1, 1, 192, 256)
+        img = img.float().view(8, 1, 176, 256)
+        mask = mask.float().view(8, 1, 176, 256)
         out = self(img)
         loss_val = F.binary_cross_entropy_with_logits(out, mask)
         val_dice = dice_coeff(out, mask)
         return {'val_loss': loss_val, 'dice': val_dice}
-        #return {'val_loss': loss_val}
 
     def validation_epoch_end(self, outputs):
         loss_val = torch.stack([x['val_loss'] for x in outputs]).mean()
