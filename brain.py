@@ -10,6 +10,7 @@ import segmentation_models_pytorch as smp
 from albumentations import Compose, Resize
 from albumentations.pytorch.transforms import ToTensorV2
 from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
+import torchmetrics
 
 
 aug = Compose([
@@ -57,6 +58,9 @@ class REMODEL_segmenter(pl.LightningModule):
         self.data_path = data_path
         self.batch_size = batch_size
         self.lr = lr
+        self.train_acc  = torchmetrics.Accuracy()
+        self.valid_acc = torchmetrics.Accuracy()
+        self.test_acc = torchmetrics.Accuracy()
 
         self.net = smp.Unet('resnet18', encoder_weights='imagenet', activation='sigmoid', in_channels=1)
         # self.net = smp.Unet('efficientnet-b0', encoder_weights='imagenet', activation='sigmoid', in_channels=1)
@@ -71,8 +75,11 @@ class REMODEL_segmenter(pl.LightningModule):
         img = img.float().view(-1, 1, 192, 256)
         mask = mask.float().view(-1, 1, 192, 256)
         out = self(img)
+        self.train_acc (out, mask.type(torch.int64))
         loss_val = F.binary_cross_entropy_with_logits(out, mask)
         log_dict = {'train_loss': loss_val}
+        self.log('train_acc', self.train_acc , prog_bar=True, on_step=True, on_epoch=False)
+
         return {'loss': loss_val, 'log': log_dict, 'progress_bar': log_dict}
 
     def validation_step(self, batch, batch_idx):
@@ -82,6 +89,9 @@ class REMODEL_segmenter(pl.LightningModule):
         out = self(img)
         loss_val = F.binary_cross_entropy_with_logits(out, mask)
         val_dice = dice_coeff(out, mask)
+        self.valid_acc(out, mask.type(torch.int64))
+        self.log('train_acc', self.valid_acc, prog_bar=True, on_step=True, on_epoch=True)
+
         return {'val_loss': loss_val, 'dice': val_dice}
 
 
@@ -91,22 +101,46 @@ class REMODEL_segmenter(pl.LightningModule):
         log_dict = {'val_loss': loss_val, 'dice': dice_val}
         return {'log': log_dict, 'val_loss': log_dict['val_loss'], 'dice': log_dict['dice'], 'progress_bar': log_dict}
 
+    def test_step(self, batch, batch_idx):
+        img, mask = batch
+        out = self(img)
+
+        loss = self.loss_function(out, mask)
+        self.log('test_loss', loss, prog_bar=True)
+
+        self.test_acc(torch.sigmoid(out), mask.type(torch.int64))
+        self.log('test_acc', self.test_acc, prog_bar=True, on_step=True, on_epoch=True)
+
+        loss_val = F.binary_cross_entropy_with_logits(out, mask)
+        log_dict = {'train_loss': loss_val}
+
+        return {'loss': loss_val, 'log': log_dict, 'progress_bar': log_dict}
+
     def prepare_data(self):
-        validation_split = .25
+        validation_split = .15
+        test_split = 0.1
         shuffle_dataset = True
         random_seed = 42
 
         self.dataset = REMODEL_dataset(dataset_dir=self.data_path, transforms=aug)
         dataset_size = len(self.dataset)
         indices = list(range(dataset_size))
-        split = int(np.floor(validation_split * dataset_size))
+        split1 = int(np.floor(validation_split * dataset_size))
         if shuffle_dataset:
             np.random.seed(random_seed)
             np.random.shuffle(indices)
-        train_indices, val_indices = indices[split:], indices[:split]
+        train_indices, val_indices = indices[split1:], indices[:split1]
+
+        indices2 = list(range(len(train_indices)))
+        split2 = int(np.floor(test_split * len(train_indices)))
+        if shuffle_dataset:
+            np.random.seed(random_seed)
+            np.random.shuffle(indices2)
+        train_indices, test_indices = indices2[split2:], indices2[:split2]
 
         self.train_sampler = SubsetRandomSampler(train_indices)
         self.valid_sampler = SubsetRandomSampler(val_indices)
+        self.test_sampler = SubsetRandomSampler(test_indices)
 
     def train_dataloader(self):
         return DataLoader(self.dataset, batch_size=self.batch_size, sampler=self.train_sampler)
@@ -114,9 +148,12 @@ class REMODEL_segmenter(pl.LightningModule):
     def val_dataloader(self):
         return DataLoader(self.dataset, batch_size=self.batch_size, sampler=self.valid_sampler)
 
+    def test_dataloader(self):
+        return DataLoader(self.dataset, batch_size=self.batch_size, sampler=self.test_sampler)
+
     def configure_optimizers(self):
         opt = torch.optim.Adam(self.net.parameters(), lr=self.lr)
-        sch = torch.optim.lr_scheduler.StepLR(optimizer=opt, step_size=500, gamma=0.1)
+        sch = torch.optim.lr_scheduler.StepLR(optimizer=opt, step_size=5, gamma=0.1)
 
         # sch = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer=opt, patience=20, factor=0.2)
         return [opt], [sch]
@@ -131,20 +168,21 @@ if __name__ == '__main__':
     checkpoint_callback = ModelCheckpoint(
 
         dirpath='checkpoints/',
-        save_top_k=3,
+        # save_top_k=3,
         verbose=True,
-        monitor='dice',
+        #monitor='dice',
         mode='max'
     )
 
-    model = REMODEL_segmenter(data_path="skullstripper_data/z_train", batch_size=8, lr=3e-4)
+    model = REMODEL_segmenter(data_path="skullstripper_data/z_train", batch_size=16, lr=3e-3)
     lr_logger = LearningRateMonitor()
     trainer = pl.Trainer(
         callbacks=[lr_logger, checkpoint_callback],
         # checkpoint_callback=checkpoint_callback,
-        max_epochs=50,
+        max_epochs=1,
         gpus=1,
-        resume_from_checkpoint="D:/Projekty/Git projekt/mastery-machine-learning/lightning_logs/version_2/checkpoints/epoch=5-step=11735.ckpt"
+        # resume_from_checkpoint="/lightning_logs/version_2/checkpoints/epoch=5-step=11735.ckpt"
     )
     trainer.fit(model)
+    trainer.test(ckpt_path=checkpoint_callback.best_model_path, test_dataloaders=trainer.test_dataloaders)
 
