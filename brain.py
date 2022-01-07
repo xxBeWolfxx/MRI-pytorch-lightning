@@ -7,8 +7,7 @@ from torch.utils.data.sampler import SubsetRandomSampler
 import pytorch_lightning as pl
 from torch.utils.data import DataLoader, Dataset
 import segmentation_models_pytorch as smp
-from albumentations import CLAHE, HorizontalFlip, Compose, RandomBrightnessContrast, RandomGamma, Resize, \
-    ChannelShuffle, ShiftScaleRotate, VerticalFlip, Normalize
+from albumentations import Compose, Resize
 from albumentations.pytorch.transforms import ToTensorV2
 from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
 
@@ -59,8 +58,8 @@ class REMODEL_segmenter(pl.LightningModule):
         self.batch_size = batch_size
         self.lr = lr
 
-        # self.net = smp.Unet('resnet18', encoder_weights='imagenet', activation='sigmoid', in_channels=1)
-        self.net = smp.Unet('efficientnet-b0', encoder_weights='imagenet', activation='sigmoid', in_channels=1)
+        self.net = smp.Unet('resnet18', encoder_weights='imagenet', activation='sigmoid', in_channels=1)
+        # self.net = smp.Unet('efficientnet-b0', encoder_weights='imagenet', activation='sigmoid', in_channels=1)
         # self.net = smp.Unet('efficientnet-b3', encoder_weights='imagenet', activation='sigmoid', in_channels=1)
 
     def forward(self, x):
@@ -117,15 +116,21 @@ class REMODEL_segmenter(pl.LightningModule):
 
     def configure_optimizers(self):
         opt = torch.optim.Adam(self.net.parameters(), lr=self.lr)
-        # sch = torch.optim.lr_scheduler.ReduceLROnPlateau(opt, patience=20, factor=0.2)
-        # return [opt], [sch]
-        return [opt]
+        sch = torch.optim.lr_scheduler.StepLR(optimizer=opt, step_size=500, gamma=0.1)
+
+        # sch = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer=opt, patience=20, factor=0.2)
+        return [opt], [sch]
+        # return [opt]
 
 
 if __name__ == '__main__':
+    # model_checkpoint = pl.callbacks.ModelCheckpoint(dirpath='/content/checkpoints')
+    # early_stopping = pl.callbacks.EarlyStopping(monitor='val_loss', patience=3)
+    # trainer = pl.Trainer(callbacks=[model_checkpoint, early_stopping], gpus=1, max_epochs=100)
+
     checkpoint_callback = ModelCheckpoint(
-        dirpath='/checkpoint',
-        filename='{epoch}-{val_loss:.2f}-{other_metric:.2f}',
+
+        dirpath='checkpoints/',
         save_top_k=3,
         verbose=True,
         monitor='dice',
@@ -135,8 +140,8 @@ if __name__ == '__main__':
     model = REMODEL_segmenter(data_path="skullstripper_data/z_train", batch_size=8, lr=3e-4)
     lr_logger = LearningRateMonitor()
     trainer = pl.Trainer(
-        callbacks=[lr_logger],
-        checkpoint_callback=checkpoint_callback,
+        callbacks=[lr_logger, checkpoint_callback],
+        # checkpoint_callback=checkpoint_callback,
         max_epochs=50,
         gpus=1,
         resume_from_checkpoint="D:/Projekty/Git projekt/mastery-machine-learning/lightning_logs/version_2/checkpoints/epoch=5-step=11735.ckpt"
