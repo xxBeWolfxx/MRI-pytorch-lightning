@@ -83,7 +83,7 @@ class REMODEL_segmenter(pl.LightningModule):
         loss_val = F.binary_cross_entropy_with_logits(out, mask)
         val_dice = dice_coeff(out, mask)
         return {'val_loss': loss_val, 'dice': val_dice}
-        #return {'val_loss': loss_val}
+
 
     def validation_epoch_end(self, outputs):
         loss_val = torch.stack([x['val_loss'] for x in outputs]).mean()
@@ -129,6 +129,7 @@ if __name__ == '__main__':
     # trainer = pl.Trainer(callbacks=[model_checkpoint, early_stopping], gpus=1, max_epochs=100)
 
     checkpoint_callback = ModelCheckpoint(
+
         dirpath='checkpoints/',
         save_top_k=3,
         verbose=True,
@@ -142,7 +143,8 @@ if __name__ == '__main__':
         callbacks=[lr_logger, checkpoint_callback],
         # checkpoint_callback=checkpoint_callback,
         max_epochs=50,
-        gpus=1
+        gpus=1,
+        resume_from_checkpoint="D:/Projekty/Git projekt/mastery-machine-learning/lightning_logs/version_2/checkpoints/epoch=5-step=11735.ckpt"
     )
     trainer.fit(model)
 
