@@ -60,7 +60,7 @@ class REMODEL_segmenter(pl.LightningModule):
         self.lr = lr
 
         # self.net = smp.Unet('resnet18', encoder_weights='imagenet', activation='sigmoid', in_channels=1)
-        self.net = smp.Unet('efficientnet-b0')
+        self.net = smp.Unet('efficientnet-b0', encoder_weights='imagenet', activation='sigmoid', in_channels=1)
         # self.net = smp.Unet('efficientnet-b3', encoder_weights='imagenet', activation='sigmoid', in_channels=1)
 
     def forward(self, x):
@@ -84,7 +84,7 @@ class REMODEL_segmenter(pl.LightningModule):
         loss_val = F.binary_cross_entropy_with_logits(out, mask)
         val_dice = dice_coeff(out, mask)
         return {'val_loss': loss_val, 'dice': val_dice}
-        #return {'val_loss': loss_val}
+
 
     def validation_epoch_end(self, outputs):
         loss_val = torch.stack([x['val_loss'] for x in outputs]).mean()
@@ -124,7 +124,8 @@ class REMODEL_segmenter(pl.LightningModule):
 
 if __name__ == '__main__':
     checkpoint_callback = ModelCheckpoint(
-        dirpath='best_weights_{epoch:04d}-{dice:.5f}',
+        dirpath='/checkpoint',
+        filename='{epoch}-{val_loss:.2f}-{other_metric:.2f}',
         save_top_k=3,
         verbose=True,
         monitor='dice',
@@ -137,7 +138,8 @@ if __name__ == '__main__':
         callbacks=[lr_logger],
         checkpoint_callback=checkpoint_callback,
         max_epochs=50,
-        gpus=1
+        gpus=1,
+        resume_from_checkpoint="D:/Projekty/Git projekt/mastery-machine-learning/lightning_logs/version_2/checkpoints/epoch=5-step=11735.ckpt"
     )
     trainer.fit(model)
 
