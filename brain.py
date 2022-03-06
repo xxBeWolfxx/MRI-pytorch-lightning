@@ -12,7 +12,6 @@ from albumentations.pytorch.transforms import ToTensorV2
 from pytorch_lightning.callbacks import LearningRateMonitor, ModelCheckpoint
 import torchmetrics
 
-
 aug = Compose([
     Resize(192, 256),
     ToTensorV2()
@@ -23,12 +22,15 @@ class REMODEL_dataset(Dataset):
     def __init__(self, dataset_dir, transforms=None):
         self.dataset_dir = dataset_dir
         self.transforms = transforms
-        self.img_lst = os.listdir(os.path.join(self.dataset_dir, "img/subdir_required_by_keras"))
+        self.img_lst = os.listdir(os.path.join(
+            self.dataset_dir, "img/subdir_required_by_keras"))
 
     def __getitem__(self, idx):
         image_name = self.img_lst[idx]
-        img = cv2.imread(os.path.join(self.dataset_dir, "img/subdir_required_by_keras", image_name))
-        mask = cv2.imread(os.path.join(self.dataset_dir, "mask/subdir_required_by_keras", image_name))
+        img = cv2.imread(os.path.join(self.dataset_dir,
+                                      "img/subdir_required_by_keras", image_name))
+        mask = cv2.imread(os.path.join(self.dataset_dir,
+                                       "mask/subdir_required_by_keras", image_name))
         img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
         augmented = self.transforms(image=img, mask=mask)
@@ -58,11 +60,12 @@ class REMODEL_segmenter(pl.LightningModule):
         self.data_path = data_path
         self.batch_size = batch_size
         self.lr = lr
-        self.train_acc  = torchmetrics.Accuracy()
-        self.valid_acc = torchmetrics.Accuracy()
-        self.test_acc = torchmetrics.Accuracy()
+        # self.loss_function = torch.nn.BCEWithLogitsLoss
+        self.loss_function = F.binary_cross_entropy_with_logits
+        self.accuracy = torchmetrics.Accuracy()
 
-        self.net = smp.Unet('resnet18', encoder_weights='imagenet', activation='sigmoid', in_channels=1)
+        self.net = smp.Unet('resnet18', encoder_weights='imagenet',
+                            activation='sigmoid', in_channels=1)
         # self.net = smp.Unet('efficientnet-b0', encoder_weights='imagenet', activation='sigmoid', in_channels=1)
         # self.net = smp.Unet('efficientnet-b3', encoder_weights='imagenet', activation='sigmoid', in_channels=1)
 
@@ -75,46 +78,36 @@ class REMODEL_segmenter(pl.LightningModule):
         img = img.float().view(-1, 1, 192, 256)
         mask = mask.float().view(-1, 1, 192, 256)
         out = self(img)
-        self.train_acc (out, mask.type(torch.int64))
-        loss_val = F.binary_cross_entropy_with_logits(out, mask)
-        log_dict = {'train_loss': loss_val}
-        self.log('train_acc', self.train_acc , prog_bar=True, on_step=True, on_epoch=False)
 
-        return {'loss': loss_val, 'log': log_dict, 'progress_bar': log_dict}
+        loss = self.loss_function(out, mask)
+        self.accuracy(out, mask.type(torch.int64))
+        self.log('train_acc', self.accuracy, prog_bar=True)
+
+        return loss
 
     def validation_step(self, batch, batch_idx):
         img, mask = batch
         img = img.float().view(-1, 1, 192, 256)
         mask = mask.float().view(-1, 1, 192, 256)
         out = self(img)
-        loss_val = F.binary_cross_entropy_with_logits(out, mask)
-        val_dice = dice_coeff(out, mask)
-        self.valid_acc(out, mask.type(torch.int64))
-        self.log('train_acc', self.valid_acc, prog_bar=True, on_step=True, on_epoch=True)
 
-        return {'val_loss': loss_val, 'dice': val_dice}
+        loss = self.loss_function(out, mask)
+        self.log('val_loss', loss, prog_bar=True)
 
-
-    def validation_epoch_end(self, outputs):
-        loss_val = torch.stack([x['val_loss'] for x in outputs]).mean()
-        dice_val = torch.stack([x['dice'] for x in outputs]).mean()
-        log_dict = {'val_loss': loss_val, 'dice': dice_val}
-        return {'log': log_dict, 'val_loss': log_dict['val_loss'], 'dice': log_dict['dice'], 'progress_bar': log_dict}
+        self.accuracy(out, mask.type(torch.int64))
+        self.log('val_acc', self.accuracy, prog_bar=True)
 
     def test_step(self, batch, batch_idx):
         img, mask = batch
+        img = img.float().view(-1, 1, 192, 256)
+        mask = mask.float().view(-1, 1, 192, 256)
         out = self(img)
+
+        self.accuracy(torch.sigmoid(out), mask.type(torch.int64))
+        self.log('test_acc', self.accuracy, prog_bar=True)
 
         loss = self.loss_function(out, mask)
         self.log('test_loss', loss, prog_bar=True)
-
-        self.test_acc(torch.sigmoid(out), mask.type(torch.int64))
-        self.log('test_acc', self.test_acc, prog_bar=True, on_step=True, on_epoch=True)
-
-        loss_val = F.binary_cross_entropy_with_logits(out, mask)
-        log_dict = {'train_loss': loss_val}
-
-        return {'loss': loss_val, 'log': log_dict, 'progress_bar': log_dict}
 
     def prepare_data(self):
         validation_split = .15
@@ -122,7 +115,8 @@ class REMODEL_segmenter(pl.LightningModule):
         shuffle_dataset = True
         random_seed = 42
 
-        self.dataset = REMODEL_dataset(dataset_dir=self.data_path, transforms=aug)
+        self.dataset = REMODEL_dataset(
+            dataset_dir=self.data_path, transforms=aug)
         dataset_size = len(self.dataset)
         indices = list(range(dataset_size))
         split1 = int(np.floor(validation_split * dataset_size))
@@ -153,7 +147,8 @@ class REMODEL_segmenter(pl.LightningModule):
 
     def configure_optimizers(self):
         opt = torch.optim.Adam(self.net.parameters(), lr=self.lr)
-        sch = torch.optim.lr_scheduler.StepLR(optimizer=opt, step_size=5, gamma=0.1)
+        sch = torch.optim.lr_scheduler.StepLR(
+            optimizer=opt, step_size=500, gamma=0.1)
 
         # sch = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer=opt, patience=20, factor=0.2)
         return [opt], [sch]
@@ -161,7 +156,7 @@ class REMODEL_segmenter(pl.LightningModule):
 
 
 if __name__ == '__main__':
-    # model_checkpoint = pl.callbacks.ModelCheckpoint(dirpath='/content/checkpoints')
+    # model_checkpoint = pl.callbacks.ModelCheckpoint(dirpath='checkpoints')
     # early_stopping = pl.callbacks.EarlyStopping(monitor='val_loss', patience=3)
     # trainer = pl.Trainer(callbacks=[model_checkpoint, early_stopping], gpus=1, max_epochs=100)
 
@@ -170,19 +165,19 @@ if __name__ == '__main__':
         dirpath='checkpoints/',
         # save_top_k=3,
         verbose=True,
-        #monitor='dice',
+        # monitor='dice',
         mode='max'
     )
 
-    model = REMODEL_segmenter(data_path="skullstripper_data/z_train", batch_size=16, lr=3e-3)
+    model = REMODEL_segmenter(
+        data_path="skullstripper_data/z_train", batch_size=16, lr=3e-3)
     lr_logger = LearningRateMonitor()
     trainer = pl.Trainer(
         callbacks=[lr_logger, checkpoint_callback],
         # checkpoint_callback=checkpoint_callback,
         max_epochs=1,
         gpus=1,
-        # resume_from_checkpoint="/lightning_logs/version_2/checkpoints/epoch=5-step=11735.ckpt"
+        resume_from_checkpoint="checkpoints/epoch=0-step=997.ckpt"
     )
     trainer.fit(model)
-    trainer.test(ckpt_path=checkpoint_callback.best_model_path, test_dataloaders=trainer.test_dataloaders)
-
+    # trainer.test(ckpt_path="checkpoints/epoch=0-step=997.ckpt", test_dataloaders=trainer.test_dataloaders)
