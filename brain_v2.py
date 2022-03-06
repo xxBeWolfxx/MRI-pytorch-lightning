@@ -73,7 +73,6 @@ class Segmenter(pl.LightningModule):
         # self.network = Unet('efficientnet-b0', encoder_weights='imagenet', activation='sigmoid', in_channels=1)
         self.network = Unet('efficientnet-b3', encoder_weights='imagenet', activation='sigmoid', in_channels=1)
         self.loss_function = F.binary_cross_entropy_with_logits
-        self.accuracy = torchmetrics.Accuracy()
 
     def forward(self, x):
         return self.network(x)
@@ -85,8 +84,14 @@ class Segmenter(pl.LightningModule):
         out = self(img)
 
         loss = self.loss_function(out, mask)
-        self.accuracy(out, mask.type(torch.int64))
-        self.log('train_acc', self.accuracy, prog_bar=True)
+        accuracy = torchmetrics.functional.accuracy(out, mask.type(torch.int64))
+        precision = torchmetrics.functional.precision(out, mask.type(torch.int64))
+        recall = torchmetrics.functional.recall(out, mask.type(torch.int64))
+        dice_score = dice_coeff(out, mask.type(torch.int64))
+        self.log('train_acc', accuracy, prog_bar=True)
+        self.log('train_precision', precision, prog_bar=True)
+        self.log('train_recall', recall, prog_bar=True)
+        self.log('train_dice', dice_score, prog_bar=True)
 
         return loss
 
@@ -98,9 +103,15 @@ class Segmenter(pl.LightningModule):
 
         loss = self.loss_function(out, mask)
         self.log('val_loss', loss, prog_bar=True)
+        accuracy = torchmetrics.functional.accuracy(out, mask.type(torch.int64))
+        precision = torchmetrics.functional.precision(out, mask.type(torch.int64))
+        recall = torchmetrics.functional.recall(out, mask.type(torch.int64))
+        dice_score = dice_coeff(out, mask.type(torch.int64))
+        self.log('val_acc', accuracy, prog_bar=True)
+        self.log('val_precision', precision, prog_bar=True)
+        self.log('val_recall', recall, prog_bar=True)
+        self.log('val_dice', dice_score, prog_bar=True)
 
-        self.accuracy(out, mask.type(torch.int64))
-        self.log('val_acc', self.accuracy, prog_bar=True)
 
     def test_step(self, batch, batch_idx):
         img, mask = batch
@@ -108,11 +119,16 @@ class Segmenter(pl.LightningModule):
         mask = mask.float().view(-1, 1, 192, 256)
         out = self(img)
 
-        self.accuracy(out, mask.type(torch.int64))
-        self.log('test_acc', self.accuracy, prog_bar=True)
-
         loss = self.loss_function(out, mask)
         self.log('test_loss', loss, prog_bar=True)
+        accuracy = torchmetrics.functional.accuracy(out, mask.type(torch.int64))
+        precision = torchmetrics.functional.precision(out, mask.type(torch.int64))
+        recall = torchmetrics.functional.recall(out, mask.type(torch.int64))
+        dice_score = dice_coeff(out, mask.type(torch.int64))
+        self.log('test_acc', accuracy, prog_bar=True)
+        self.log('test_precision', precision, prog_bar=True)
+        self.log('test_recall', recall, prog_bar=True)
+        self.log('test_dice', dice_score, prog_bar=True)
 
     def configure_optimizers(self):
         opt = torch.optim.Adam(self.parameters(), lr=1e-4)
@@ -129,18 +145,23 @@ test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=8)
 segmenter = Segmenter()
 
 model_checkpoint = pl.callbacks.ModelCheckpoint(dirpath='checkpoints/')
-lr_logger = LearningRateMonitor()
 # early_stopping = pl.callbacks.EarlyStopping(monitor='val_loss', patience=3)
 
+logger = pl.loggers.NeptuneLogger(
+    api_key='eyJhcGlfYWRkcmVzcyI6Imh0dHBzOi8vYXBwLm5lcHR1bmUuYWkiLCJhcGlfdXJsIjoiaHR0cHM6Ly9hcHAubmVwdHVuZS5haSIsImFwaV9rZXkiOiJlMmM5ZDE1Mi1jYTBmLTQzNjMtYWZiNy0zYmI1MjI1OGExMmUifQ==',
+    project='aniakettner/brain'
+)
+
 trainer = pl.Trainer(
-    callbacks=[lr_logger, model_checkpoint],
+    logger=logger,
+    callbacks=[model_checkpoint],
     gpus=1,
-    max_epochs=5,
-    resume_from_checkpoint="checkpoints/epoch=4-step=11084.ckpt"
+    max_epochs=10,
+    # resume_from_checkpoint="checkpoints/epoch=4-step=11084.ckpt"
 )
 
 trainer.fit(segmenter, train_dataloaders=train_loader, val_dataloaders=val_loader)
-trainer.test(ckpt_path='checkpoints/epoch=4-step=11084.ckpt', test_dataloaders=test_loader)
+# trainer.test(ckpt_path='checkpoints/epoch=4-step=11084.ckpt', test_dataloaders=test_loader)
 
 with torch.no_grad():
     image, mask = test_dataset[0]
