@@ -3,7 +3,7 @@ import matplotlib.pyplot as plt
 import torch
 import cv2
 import numpy as np
-from albumentations import Compose, Resize
+from albumentations import Compose, Resize, PadIfNeeded
 from albumentations.pytorch import ToTensorV2
 from pathlib import Path
 from typing import List
@@ -21,9 +21,15 @@ class SkullstripperDataset(torch.utils.data.Dataset):
         self._labels_path = path / 'mask/subdir_required_by_keras'
         self._allowed_names = allowed_names
 
+        self.wantedSize = (192, 256)
+
+
+
+
         if augment:
             self._transforms = Compose([
-                Resize(192, 256),
+                Resize(176, 256),
+                PadIfNeeded(*self.wantedSize),
                 ToTensorV2()
             ])
 
@@ -126,6 +132,7 @@ train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=8)
 val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=8)
 test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=8)
 
+
 segmenter = Segmenter()
 
 model_checkpoint = pl.callbacks.ModelCheckpoint(dirpath='checkpoints/')
@@ -136,11 +143,11 @@ trainer = pl.Trainer(
     callbacks=[lr_logger, model_checkpoint],
     gpus=1,
     max_epochs=5,
-    resume_from_checkpoint="checkpoints/epoch=4-step=11084.ckpt"
+    #resume_from_checkpoint="checkpoints/epoch=4-step=11084.ckpt"
 )
 
 trainer.fit(segmenter, train_dataloaders=train_loader, val_dataloaders=val_loader)
-trainer.test(ckpt_path='checkpoints/epoch=4-step=11084.ckpt', test_dataloaders=test_loader)
+#trainer.test(ckpt_path='checkpoints/epoch=4-step=11084.ckpt', test_dataloaders=test_loader)
 
 with torch.no_grad():
     image, mask = test_dataset[0]
