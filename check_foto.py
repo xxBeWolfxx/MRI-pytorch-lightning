@@ -1,8 +1,10 @@
 import cv2
 
 # read image
-img = cv2.imread('skullstripper_data/z_train/img/subdir_required_by_keras/CC0001_philips_15_55_Mimage-slice000.png', cv2.IMREAD_UNCHANGED)
-mask = cv2.imread('skullstripper_data/z_validation/mask/subdir_required_by_keras/CC0001_philips_15_55_Mimage-slice088.png', cv2.IMREAD_UNCHANGED)
+from rich import print
+
+img = cv2.imread('D:/Projekty/Git projekt/mastery-machine-learning/skullstripper_data/z_train/img/subdir_required_by_keras/CC0001_philips_15_55_Mimage-slice003.png', cv2.IMREAD_UNCHANGED)
+mask = cv2.imread('D:/Projekty/Git projekt/mastery-machine-learning/skullstripper_data/z_train/mask/subdir_required_by_keras/CC0001_philips_15_55_Mimage-slice003.png', cv2.IMREAD_UNCHANGED)
 
 # get dimensions of image
 dimensions = img.shape
@@ -23,3 +25,4 @@ print('Image Dimension    : ', dimensions, dimensions_mask)
 print('Image Height       : ', height)
 print('Image Width        : ', width)
 print('Number of Channels : ', channels)
+

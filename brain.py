@@ -22,12 +22,15 @@ class REMODEL_dataset(Dataset):
     def __init__(self, dataset_dir, transforms=None):
         self.dataset_dir = dataset_dir
         self.transforms = transforms
-        self.img_lst = os.listdir(os.path.join(self.dataset_dir, "img/subdir_required_by_keras"))
+        self.img_lst = os.listdir(os.path.join(
+            self.dataset_dir, "img/subdir_required_by_keras"))
 
     def __getitem__(self, idx):
         image_name = self.img_lst[idx]
-        img = cv2.imread(os.path.join(self.dataset_dir, "img/subdir_required_by_keras", image_name))
-        mask = cv2.imread(os.path.join(self.dataset_dir, "mask/subdir_required_by_keras", image_name))
+        img = cv2.imread(os.path.join(self.dataset_dir,
+                                      "img/subdir_required_by_keras", image_name))
+        mask = cv2.imread(os.path.join(self.dataset_dir,
+                                       "mask/subdir_required_by_keras", image_name))
         img = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         mask = cv2.cvtColor(mask, cv2.COLOR_BGR2GRAY)
         augmented = self.transforms(image=img, mask=mask)
@@ -61,7 +64,8 @@ class REMODEL_segmenter(pl.LightningModule):
         self.loss_function = F.binary_cross_entropy_with_logits
         self.accuracy = torchmetrics.Accuracy()
 
-        self.net = smp.Unet('resnet18', encoder_weights='imagenet', activation='sigmoid', in_channels=1)
+        self.net = smp.Unet('resnet18', encoder_weights='imagenet',
+                            activation='sigmoid', in_channels=1)
         # self.net = smp.Unet('efficientnet-b0', encoder_weights='imagenet', activation='sigmoid', in_channels=1)
         # self.net = smp.Unet('efficientnet-b3', encoder_weights='imagenet', activation='sigmoid', in_channels=1)
 
@@ -111,7 +115,8 @@ class REMODEL_segmenter(pl.LightningModule):
         shuffle_dataset = True
         random_seed = 42
 
-        self.dataset = REMODEL_dataset(dataset_dir=self.data_path, transforms=aug)
+        self.dataset = REMODEL_dataset(
+            dataset_dir=self.data_path, transforms=aug)
         dataset_size = len(self.dataset)
         indices = list(range(dataset_size))
         split1 = int(np.floor(validation_split * dataset_size))
@@ -142,7 +147,8 @@ class REMODEL_segmenter(pl.LightningModule):
 
     def configure_optimizers(self):
         opt = torch.optim.Adam(self.net.parameters(), lr=self.lr)
-        sch = torch.optim.lr_scheduler.StepLR(optimizer=opt, step_size=500, gamma=0.1)
+        sch = torch.optim.lr_scheduler.StepLR(
+            optimizer=opt, step_size=500, gamma=0.1)
 
         # sch = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer=opt, patience=20, factor=0.2)
         return [opt], [sch]
@@ -163,7 +169,8 @@ if __name__ == '__main__':
         mode='max'
     )
 
-    model = REMODEL_segmenter(data_path="skullstripper_data/z_train", batch_size=16, lr=3e-3)
+    model = REMODEL_segmenter(
+        data_path="skullstripper_data/z_train", batch_size=16, lr=3e-3)
     lr_logger = LearningRateMonitor()
     trainer = pl.Trainer(
         callbacks=[lr_logger, checkpoint_callback],
@@ -174,5 +181,3 @@ if __name__ == '__main__':
     )
     trainer.fit(model)
     # trainer.test(ckpt_path="checkpoints/epoch=0-step=997.ckpt", test_dataloaders=trainer.test_dataloaders)
-
-
