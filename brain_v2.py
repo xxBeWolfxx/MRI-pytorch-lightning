@@ -28,7 +28,7 @@ class SkullstripperDataset(torch.utils.data.Dataset):
 
         if augment:
             self._transforms = Compose([
-                Resize(176, 256),
+                Resize(176,256),
                 PadIfNeeded(*self.wantedSize),
                 ToTensorV2()
             ])
@@ -90,6 +90,7 @@ class Segmenter(pl.LightningModule):
         out = self(img)
 
         loss = self.loss_function(out, mask)
+        self.log('train_loss', loss, prog_bar=True)
         accuracy = torchmetrics.functional.accuracy(out, mask.type(torch.int64))
         precision = torchmetrics.functional.precision(out, mask.type(torch.int64))
         recall = torchmetrics.functional.recall(out, mask.type(torch.int64))
@@ -164,7 +165,7 @@ trainer = pl.Trainer(
     callbacks=[model_checkpoint],
     gpus=1,
 
-    max_epochs=10,
+    max_epochs=15,
     # resume_from_checkpoint="checkpoints/epoch=4-step=11084.ckpt"
 )
 

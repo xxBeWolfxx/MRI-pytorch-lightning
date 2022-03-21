@@ -1,2 +1,8 @@
 *.png
 checkpoints/epoch=0-step=997.ckpt
+.neptune/async/95c1a81d-39b9-4d47-8fdd-c275eeace84b/exec-0-2022-03-06_19.03.36.327354/last_ack_version
+.neptune/async/95c1a75b-ccc1-4094-94a7-6b1e7eaaf1a2/exec-0-2022-03-06_19.01.29.558159/container_type
+*.log
+.neptune/async/95c1a75b-ccc1-4094-94a7-6b1e7eaaf1a2/exec-0-2022-03-06_19.01.29.558159/last_ack_version
+.neptune/async/95c1a75b-ccc1-4094-94a7-6b1e7eaaf1a2/exec-0-2022-03-06_19.01.29.558159/last_put_version
+.neptune*
