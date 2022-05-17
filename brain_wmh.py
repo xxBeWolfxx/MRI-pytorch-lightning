@@ -16,6 +16,8 @@ import pytorch_lightning as pl
 import torchmetrics
 from segmentation_models_pytorch import Unet
 
+max_epochs = 1000
+
 
 class SkullstripperDataset(torch.utils.data.Dataset):
     def __init__(self, path: Path, allowed_names: List[str], augment: bool = False):
@@ -67,15 +69,32 @@ def dice_coeff(pred, target):
 
     return (2. * intersection + smooth) / (m1.sum() + m2.sum() + smooth)
 
-class Segmenter(pl.LightningModule):
+
+class DiceLoss(torch.nn.Module):
     def __init__(self):
         super().__init__()
 
-        self.network = Unet('resnet18', encoder_weights='imagenet', activation='sigmoid', in_channels=1)
-        # self.network = Unet('efficientnet-b0', encoder_weights='imagenet', activation='sigmoid', in_channels=1)
-        # self.network = Unet('efficientnet-b3', encoder_weights='imagenet', activation='sigmoid', in_channels=1)
+    def forward(self, preds, target):
+        preds = torch.sigmoid(preds)
+        preds = preds.flatten()
+        target = target.flatten()
 
-        self.loss_function = F.binary_cross_entropy_with_logits
+        intersection = (preds * target).sum()
+        return 1 - ((2 * intersection + 1) / (preds.sum() + target.sum() + 1))
+
+
+class Segmenter(pl.LightningModule):
+    global max_epochs
+    alphaBL = (1 / max_epochs)
+
+    def __init__(self):
+        super().__init__()
+
+        # self.network = Unet('resnet18', encoder_weights='imagenet', activation='sigmoid', in_channels=1)
+        # self.network = Unet('efficientnet-b0', encoder_weights='imagenet', activation='sigmoid', in_channels=1)
+        self.network = Unet('efficientnet-b3', encoder_weights='imagenet', activation='sigmoid', in_channels=1)
+
+        self.loss_function = DiceLoss()
 
     def forward(self, x):
         return self.network(x)
@@ -97,6 +116,9 @@ class Segmenter(pl.LightningModule):
         self.log('train_recall', recall, prog_bar=True)
         self.log('train_dice', dice_score, prog_bar=True)
 
+        self.alphaBL = (1 / max_epochs) + (1 / max_epochs) * self.current_epoch
+        loss = (1 - self.alphaBL) * loss + self.alphaBL * self.bounderLoss(precision, recall)
+
         return loss
 
     def validation_step(self, batch, batch_idx):
@@ -106,11 +128,16 @@ class Segmenter(pl.LightningModule):
         out = self(img)
 
         loss = self.loss_function(out, mask)
-        self.log('val_loss', loss, prog_bar=True)
+
         accuracy = torchmetrics.functional.accuracy(out, mask.type(torch.int64))
         precision = torchmetrics.functional.precision(out, mask.type(torch.int64))
         recall = torchmetrics.functional.recall(out, mask.type(torch.int64))
         dice_score = dice_coeff(out, mask.type(torch.int64))
+
+        self.alphaBL = (1 / max_epochs) + (1 / max_epochs) * self.current_epoch
+        loss = (1 - self.alphaBL) * loss + self.alphaBL * self.bounderLoss(precision, recall)
+
+        self.log('val_loss', loss, prog_bar=True)
         self.log('val_acc', accuracy, prog_bar=True)
         self.log('val_precision', precision, prog_bar=True)
         self.log('val_recall', recall, prog_bar=True)
@@ -123,11 +150,16 @@ class Segmenter(pl.LightningModule):
         out = self(img)
 
         loss = self.loss_function(out, mask)
-        self.log('test_loss', loss, prog_bar=True)
+
         accuracy = torchmetrics.functional.accuracy(out, mask.type(torch.int64))
         precision = torchmetrics.functional.precision(out, mask.type(torch.int64))
         recall = torchmetrics.functional.recall(out, mask.type(torch.int64))
         dice_score = dice_coeff(out, mask.type(torch.int64))
+
+        self.alphaBL = (1 / max_epochs) + (1 / max_epochs) * self.current_epoch
+        loss = (1 - self.alphaBL) * loss + self.alphaBL * self.bounderLoss(precision, recall)
+
+        self.log('test_loss', loss, prog_bar=True)
         self.log('test_acc', accuracy, prog_bar=True)
         self.log('test_precision', precision, prog_bar=True)
         self.log('test_recall', recall, prog_bar=True)
@@ -139,6 +171,10 @@ class Segmenter(pl.LightningModule):
         return [opt], [sch]
 
         # return torch.optim.Adam(self.parameters(), lr=1e-4)
+
+    def bounderLoss(self, precision, recall):
+        bounder = 2 * precision * recall / (precision + recall + 1e-7)
+        return bounder
 
 
 train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=8)
@@ -160,12 +196,12 @@ trainer = pl.Trainer(
     callbacks=[model_checkpoint],
     gpus=1,
 
-    max_epochs=15,
-    # resume_from_checkpoint="checkpoints/epoch=4-step=11084.ckpt"
+    max_epochs=max_epochs,
+    resume_from_checkpoint="checkpoints/epoch=999-step=511999.ckpt"
 )
 
 trainer.fit(segmenter, train_dataloaders=train_loader, val_dataloaders=val_loader)
-# trainer.test(ckpt_path='checkpoints/epoch=4-step=11084.ckpt', test_dataloaders=test_loader)
+# trainer.test(ckpt_path='checkpoints/epoch=999-step=511999.ckpt', test_dataloaders=test_loader)
 
 
 with torch.no_grad():
@@ -175,9 +211,13 @@ with torch.no_grad():
     result[result < 0.5] = 0
     result[result != 0] = 1
 
-    plt.imshow(image.permute(1, 2, 0))
+    plt.imshow(image.permute(1, 2, 0), cmap='gray')
+    # plt.imsave('brain1.png', image.squeeze(), cmap='gray')
     plt.figure()
-    plt.imshow(result.squeeze())
+    plt.imshow(result.squeeze(), cmap='gray')
+    # plt.imsave('WMH_epochs1000_efficientnet.png', result.squeeze(), cmap='gray')
     plt.figure()
-    plt.imshow(mask.squeeze())
+    plt.imshow(mask.squeeze(), cmap='gray')
+    # plt.imsave('mask1.png', mask.squeeze(), cmap='gray')
+
     plt.show()
