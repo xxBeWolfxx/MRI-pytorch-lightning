@@ -16,20 +16,22 @@ import pytorch_lightning as pl
 import torchmetrics
 from segmentation_models_pytorch import Unet
 
-max_epochs = 1000
+max_epochs = 500
+photoSize = (256, 160)
 
 
 class SkullstripperDataset(torch.utils.data.Dataset):
     def __init__(self, path: Path, allowed_names: List[str], augment: bool = False):
+        global photoSize
         self._images_path = path / 'img'
         self._labels_path = path / 'mask'
         self._allowed_names = allowed_names
 
-        self.wantedSize = (96, 160)
+        self.wantedSize = photoSize
 
         if augment:
             self._transforms = Compose([
-                Resize(83, 132),
+                Resize(self.wantedSize[0], 132),
                 PadIfNeeded(*self.wantedSize),
                 ToTensorV2()
             ])
@@ -84,25 +86,27 @@ class DiceLoss(torch.nn.Module):
 
 
 class Segmenter(pl.LightningModule):
-    global max_epochs
+    global max_epochs, photoSize
     alphaBL = (1 / max_epochs)
 
     def __init__(self):
         super().__init__()
 
-        # self.network = Unet('resnet18', encoder_weights='imagenet', activation='sigmoid', in_channels=1)
+        self.network = Unet('resnet18', encoder_weights='imagenet', activation='sigmoid', in_channels=1)
         # self.network = Unet('efficientnet-b0', encoder_weights='imagenet', activation='sigmoid', in_channels=1)
-        self.network = Unet('efficientnet-b3', encoder_weights='imagenet', activation='sigmoid', in_channels=1)
+        # self.network = Unet('efficientnet-b3', encoder_weights='imagenet', activation='sigmoid', in_channels=1)
 
         self.loss_function = DiceLoss()
+
+        self.wantedSize = photoSize
 
     def forward(self, x):
         return self.network(x)
 
     def training_step(self, batch, batch_idx):
         img, mask = batch
-        img = img.float().view(-1, 1, 96, 160)
-        mask = mask.float().view(-1, 1, 96, 160)
+        img = img.float().view(-1, 1, self.wantedSize[0], self.wantedSize[1])
+        mask = mask.float().view(-1, 1, self.wantedSize[0], self.wantedSize[1])
         out = self(img)
 
         loss = self.loss_function(out, mask)
@@ -123,8 +127,8 @@ class Segmenter(pl.LightningModule):
 
     def validation_step(self, batch, batch_idx):
         img, mask = batch
-        img = img.float().view(-1, 1, 96, 160)
-        mask = mask.float().view(-1, 1, 96, 160)
+        img = img.float().view(-1, 1, self.wantedSize[0], self.wantedSize[1])
+        mask = mask.float().view(-1, 1, self.wantedSize[0], self.wantedSize[1])
         out = self(img)
 
         loss = self.loss_function(out, mask)
@@ -145,8 +149,8 @@ class Segmenter(pl.LightningModule):
 
     def test_step(self, batch, batch_idx):
         img, mask = batch
-        img = img.float().view(-1, 1, 96, 160)
-        mask = mask.float().view(-1, 1, 96, 160)
+        img = img.float().view(-1, 1, self.wantedSize[0], self.wantedSize[1])
+        mask = mask.float().view(-1, 1, self.wantedSize[0], self.wantedSize[1])
         out = self(img)
 
         loss = self.loss_function(out, mask)
@@ -197,27 +201,27 @@ trainer = pl.Trainer(
     gpus=1,
 
     max_epochs=max_epochs,
-    resume_from_checkpoint="checkpoints/epoch=999-step=511999.ckpt"
+    # resume_from_checkpoint="checkpoints/epoch=99-step=16599.ckpt"
 )
 
 trainer.fit(segmenter, train_dataloaders=train_loader, val_dataloaders=val_loader)
-# trainer.test(ckpt_path='checkpoints/epoch=999-step=511999.ckpt', test_dataloaders=test_loader)
+# trainer.test(ckpt_path='checkpoints/epoch=99-step=26399.ckpt', test_dataloaders=test_loader)
 
 
 with torch.no_grad():
-    image, mask = test_dataset[0]
+    image, mask = test_dataset[16]
     image = image.float()
     result = segmenter(image[None, ...])
     result[result < 0.5] = 0
     result[result != 0] = 1
 
     plt.imshow(image.permute(1, 2, 0), cmap='gray')
-    # plt.imsave('brain1.png', image.squeeze(), cmap='gray')
+    plt.imsave('brain8.png', image.squeeze(), cmap='gray')
     plt.figure()
     plt.imshow(result.squeeze(), cmap='gray')
-    # plt.imsave('WMH_epochs1000_efficientnet.png', result.squeeze(), cmap='gray')
+    plt.imsave('WMH8_epochs500_resnetZ.png', result.squeeze(), cmap='gray')
     plt.figure()
     plt.imshow(mask.squeeze(), cmap='gray')
-    # plt.imsave('mask1.png', mask.squeeze(), cmap='gray')
+    plt.imsave('mask8.png', mask.squeeze(), cmap='gray')
 
     plt.show()
