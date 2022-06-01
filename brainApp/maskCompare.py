@@ -1,13 +1,14 @@
 import cv2
 import numpy as np
 import os
+from skimage.metrics import structural_similarity as ssim
+import matplotlib.pyplot as plt
 
 class ImageComparator():
     def __init__(self, pathToFiles):
         self.globalPath = pathToFiles
         self.listOfDirectories = os.listdir(pathToFiles)
-
-
+        self.minimum_commutative_image_diff = 1
 
 # maskOriginal = cv2.imread("D:/Projekty/Git projekt/mastery-machine-learning/wyniki/mask1.png")
 # maskNet = cv2.imread("D:/Projekty/Git projekt/mastery-machine-learning/wyniki/WMH1_epochs1000_efficientnet.png")
@@ -55,7 +56,21 @@ class ImageComparator():
         divNumber = np.where(div == -255)
         x, divNumber = divNumber.shape
 
+    def compareImage(self):
+        
 
+    @staticmethod
+    def get_image_difference(image_1, image_2):
+        first_image_hist = cv2.calcHist([image_1], [0], None, [256], [0, 256])
+        second_image_hist = cv2.calcHist([image_2], [0], None, [256], [0, 256])
+
+        img_hist_diff = cv2.compareHist(first_image_hist, second_image_hist, cv2.HISTCMP_BHATTACHARYYA)
+        img_template_probability_match = cv2.matchTemplate(first_image_hist, second_image_hist, cv2.TM_CCOEFF_NORMED)[0][0]
+        img_template_diff = 1 - img_template_probability_match
+
+        # taking only 10% of histogram diff, since it's less accurate than template method
+        commutative_image_diff = (img_hist_diff / 10) + img_template_diff
+        return commutative_image_diff
 
 
 
