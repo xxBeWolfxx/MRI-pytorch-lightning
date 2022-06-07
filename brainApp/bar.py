@@ -35,9 +35,9 @@ class Bar():
         return 0
 
 
-barek = Bar(120)
-
-for x in range(100):
-    if barek.process(5):
-        break
-    time.sleep(1)
+# barek = Bar(120)
+#
+# for x in range(100):
+#     if barek.process(5):
+#         break
+#     time.sleep(1)

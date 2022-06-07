@@ -1,23 +1,22 @@
 import cv2
 import numpy as np
 import os
-from skimage.metrics import structural_similarity as ssim
-import matplotlib.pyplot as plt
+from bar import Bar
 
 class ImageComparator():
+
     def __init__(self, pathToFiles):
-        self.globalPath = pathToFiles
+        print("********maskComparer*************\n Trial edition")
+        self.globalPath = pathToFiles + "/"
         self.listOfDirectories = os.listdir(pathToFiles)
         self.minimum_commutative_image_diff = 1
 
-# maskOriginal = cv2.imread("D:/Projekty/Git projekt/mastery-machine-learning/wyniki/mask1.png")
-# maskNet = cv2.imread("D:/Projekty/Git projekt/mastery-machine-learning/wyniki/WMH1_epochs1000_efficientnet.png")
-# brain = cv2.imread("D:/Projekty/Git projekt/mastery-machine-learning/wyniki/brain1.png")
 
     def importFiles(self, directory):
-        pathMaskOriginal = directory + "/mask.png"
-        pathMaskNet = directory + "/seg.png"
-        pathBrain = directory + "/brain.png"
+        pathMaskOriginal = self.globalPath + directory + "/mask.png"
+        pathMaskNet = self.globalPath + directory + "/seg.png"
+        pathBrain = self.globalPath + directory + "/brain.png"
+        self.directory = directory
 
         self.maskOriginal = cv2.imread(pathMaskOriginal)
         self.maskNet = cv2.imread(pathMaskNet)
@@ -39,48 +38,24 @@ class ImageComparator():
         vis2 = cv2.resize(vis2, (512, 512))
 
         if save:
-            cv2.imwrite("processingImg.png", vis2)
+            pathWrite = self.globalPath + self.directory + "/"
+            cv2.imwrite(pathWrite + "processingImg.png", vis2)
 
         if show:
             cv2.imshow('DATA', vis2)
             cv2.waitKey()
 
-    def dataProcessing(self):
-        mask = cv2.cvtColor(self.maskOriginal, cv2.COLOR_BGR2GRAY)
-        net = cv2.cvtColor(self.maskNet, cv2.COLOR_BGR2GRAY)
-        mask = np.asarray(mask, dtype="int32")
-        net = np.asarray(net, dtype="int32")
-
-        counterDiv = 0
-        div = np.subtract(mask, net)
-        divNumber = np.where(div == -255)
-        x, divNumber = divNumber.shape
-
-    def compareImage(self):
-        
-
-    @staticmethod
-    def get_image_difference(image_1, image_2):
-        first_image_hist = cv2.calcHist([image_1], [0], None, [256], [0, 256])
-        second_image_hist = cv2.calcHist([image_2], [0], None, [256], [0, 256])
-
-        img_hist_diff = cv2.compareHist(first_image_hist, second_image_hist, cv2.HISTCMP_BHATTACHARYYA)
-        img_template_probability_match = cv2.matchTemplate(first_image_hist, second_image_hist, cv2.TM_CCOEFF_NORMED)[0][0]
-        img_template_diff = 1 - img_template_probability_match
-
-        # taking only 10% of histogram diff, since it's less accurate than template method
-        commutative_image_diff = (img_hist_diff / 10) + img_template_diff
-        return commutative_image_diff
 
 
-
-
-
-
-    def compareProcess(self, save):
+    def compareProcess(self, save = False, show = True):
+        bareczek = Bar(len(self.listOfDirectories))
+        i = 0
         for directory in self.listOfDirectories:
+            i = i + 1
+            bareczek.process(i)
             self.importFiles(directory=directory)
-            self.imageProcessing()
+            self.imageProcessing(save=save, show=show)
+
 
 
 
@@ -89,6 +64,7 @@ class ImageComparator():
 
 if __name__ == "__main__":
 
-    unit = ImageComparator("/home/arkadiusz/Documents")
+    unit = ImageComparator("D:/Projekty/Git projekt/mastery-machine-learning/brainApp/data")
+    unit.compareProcess(save=True)
 
 
