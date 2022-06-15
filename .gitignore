@@ -1,1 +1,5 @@
 *.png
+checkpoints/epoch=0-step=997.ckpt
+.neptune/
+lightning_logs/
+checkpoints/
