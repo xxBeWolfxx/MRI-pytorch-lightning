@@ -8,27 +8,30 @@ from albumentations.pytorch import ToTensorV2
 from pathlib import Path
 from typing import List
 from pytorch_lightning.callbacks import LearningRateMonitor
+from torch import einsum
+from torch.distributions.constraints import simplex, one_hot
 from torch.nn import functional as F
 from sklearn.model_selection import train_test_split
 import pytorch_lightning as pl
 import torchmetrics
 from segmentation_models_pytorch import Unet
 
+max_epochs = 500
+photoSize = (256, 160)
+
 
 class SkullstripperDataset(torch.utils.data.Dataset):
     def __init__(self, path: Path, allowed_names: List[str], augment: bool = False):
-        self._images_path = path / 'img/subdir_required_by_keras'
-        self._labels_path = path / 'mask/subdir_required_by_keras'
+        global photoSize
+        self._images_path = path / 'img'
+        self._labels_path = path / 'mask'
         self._allowed_names = allowed_names
 
-        self.wantedSize = (192, 256)
-
-
-
+        self.wantedSize = photoSize
 
         if augment:
             self._transforms = Compose([
-                Resize(176,256),
+                Resize(self.wantedSize[0], 132),
                 PadIfNeeded(*self.wantedSize),
                 ToTensorV2()
             ])
@@ -49,16 +52,14 @@ class SkullstripperDataset(torch.utils.data.Dataset):
         return len(self._allowed_names)
 
 
-base_path = Path('skullstripper_data')
-train_file_names = sorted([path.name for path in (base_path / 'z_train' / 'mask/subdir_required_by_keras').iterdir()])
-val_file_names = sorted(
-    [path.name for path in (base_path / 'z_validation' / 'mask/subdir_required_by_keras').iterdir()])
+base_path = Path('nii_data')
+train_file_names = sorted([path.name for path in (base_path / 'I' / 'mask').iterdir()])
+train_file_names, test_file_names = train_test_split(train_file_names, test_size=0.2, random_state=42)
+test_file_names, val_file_names = train_test_split(test_file_names, test_size=0.25, random_state=42)
 
-train_file_names, test_file_names = train_test_split(train_file_names, test_size=0.15, random_state=42)
-
-train_dataset = SkullstripperDataset(base_path / 'z_train', train_file_names, augment=True)
-val_dataset = SkullstripperDataset(base_path / 'z_validation', val_file_names, augment=True)
-test_dataset = SkullstripperDataset(base_path / 'z_train', test_file_names, augment=True)
+train_dataset = SkullstripperDataset(base_path / 'I', train_file_names, augment=True)
+val_dataset = SkullstripperDataset(base_path / 'I', val_file_names, augment=True)
+test_dataset = SkullstripperDataset(base_path / 'I', test_file_names, augment=True)
 
 
 def dice_coeff(pred, target):
@@ -71,22 +72,41 @@ def dice_coeff(pred, target):
     return (2. * intersection + smooth) / (m1.sum() + m2.sum() + smooth)
 
 
-class Segmenter(pl.LightningModule):
+class DiceLoss(torch.nn.Module):
     def __init__(self):
         super().__init__()
 
-        # self.network = Unet('resnet18', encoder_weights='imagenet', activation='sigmoid', in_channels=1)
+    def forward(self, preds, target):
+        preds = torch.sigmoid(preds)
+        preds = preds.flatten()
+        target = target.flatten()
+
+        intersection = (preds * target).sum()
+        return 1 - ((2 * intersection + 1) / (preds.sum() + target.sum() + 1))
+
+
+class Segmenter(pl.LightningModule):
+    global max_epochs, photoSize
+    alphaBL = (1 / max_epochs)
+
+    def __init__(self):
+        super().__init__()
+
+        self.network = Unet('resnet18', encoder_weights='imagenet', activation='sigmoid', in_channels=1)
         # self.network = Unet('efficientnet-b0', encoder_weights='imagenet', activation='sigmoid', in_channels=1)
-        self.network = Unet('efficientnet-b3', encoder_weights='imagenet', activation='sigmoid', in_channels=1)
-        self.loss_function = F.binary_cross_entropy_with_logits
+        # self.network = Unet('efficientnet-b3', encoder_weights='imagenet', activation='sigmoid', in_channels=1)
+
+        self.loss_function = DiceLoss()
+
+        self.wantedSize = photoSize
 
     def forward(self, x):
         return self.network(x)
 
     def training_step(self, batch, batch_idx):
         img, mask = batch
-        img = img.float().view(-1, 1, 192, 256)
-        mask = mask.float().view(-1, 1, 192, 256)
+        img = img.float().view(-1, 1, self.wantedSize[0], self.wantedSize[1])
+        mask = mask.float().view(-1, 1, self.wantedSize[0], self.wantedSize[1])
         out = self(img)
 
         loss = self.loss_function(out, mask)
@@ -100,38 +120,50 @@ class Segmenter(pl.LightningModule):
         self.log('train_recall', recall, prog_bar=True)
         self.log('train_dice', dice_score, prog_bar=True)
 
+        self.alphaBL = (1 / max_epochs) + (1 / max_epochs) * self.current_epoch
+        loss = (1 - self.alphaBL) * loss + self.alphaBL * self.bounderLoss(precision, recall)
+
         return loss
 
     def validation_step(self, batch, batch_idx):
         img, mask = batch
-        img = img.float().view(-1, 1, 192, 256)
-        mask = mask.float().view(-1, 1, 192, 256)
+        img = img.float().view(-1, 1, self.wantedSize[0], self.wantedSize[1])
+        mask = mask.float().view(-1, 1, self.wantedSize[0], self.wantedSize[1])
         out = self(img)
 
         loss = self.loss_function(out, mask)
-        self.log('val_loss', loss, prog_bar=True)
+
         accuracy = torchmetrics.functional.accuracy(out, mask.type(torch.int64))
         precision = torchmetrics.functional.precision(out, mask.type(torch.int64))
         recall = torchmetrics.functional.recall(out, mask.type(torch.int64))
         dice_score = dice_coeff(out, mask.type(torch.int64))
+
+        self.alphaBL = (1 / max_epochs) + (1 / max_epochs) * self.current_epoch
+        loss = (1 - self.alphaBL) * loss + self.alphaBL * self.bounderLoss(precision, recall)
+
+        self.log('val_loss', loss, prog_bar=True)
         self.log('val_acc', accuracy, prog_bar=True)
         self.log('val_precision', precision, prog_bar=True)
         self.log('val_recall', recall, prog_bar=True)
         self.log('val_dice', dice_score, prog_bar=True)
 
-
     def test_step(self, batch, batch_idx):
         img, mask = batch
-        img = img.float().view(-1, 1, 192, 256)
-        mask = mask.float().view(-1, 1, 192, 256)
+        img = img.float().view(-1, 1, self.wantedSize[0], self.wantedSize[1])
+        mask = mask.float().view(-1, 1, self.wantedSize[0], self.wantedSize[1])
         out = self(img)
 
         loss = self.loss_function(out, mask)
-        self.log('test_loss', loss, prog_bar=True)
+
         accuracy = torchmetrics.functional.accuracy(out, mask.type(torch.int64))
         precision = torchmetrics.functional.precision(out, mask.type(torch.int64))
         recall = torchmetrics.functional.recall(out, mask.type(torch.int64))
         dice_score = dice_coeff(out, mask.type(torch.int64))
+
+        self.alphaBL = (1 / max_epochs) + (1 / max_epochs) * self.current_epoch
+        loss = (1 - self.alphaBL) * loss + self.alphaBL * self.bounderLoss(precision, recall)
+
+        self.log('test_loss', loss, prog_bar=True)
         self.log('test_acc', accuracy, prog_bar=True)
         self.log('test_precision', precision, prog_bar=True)
         self.log('test_recall', recall, prog_bar=True)
@@ -144,11 +176,14 @@ class Segmenter(pl.LightningModule):
 
         # return torch.optim.Adam(self.parameters(), lr=1e-4)
 
+    def bounderLoss(self, precision, recall):
+        bounder = 2 * precision * recall / (precision + recall + 1e-7)
+        return bounder
+
 
 train_loader = torch.utils.data.DataLoader(train_dataset, batch_size=8)
 val_loader = torch.utils.data.DataLoader(val_dataset, batch_size=8)
 test_loader = torch.utils.data.DataLoader(test_dataset, batch_size=8)
-
 
 segmenter = Segmenter()
 
@@ -157,7 +192,7 @@ model_checkpoint = pl.callbacks.ModelCheckpoint(dirpath='checkpoints/')
 
 logger = pl.loggers.NeptuneLogger(
     api_key='eyJhcGlfYWRkcmVzcyI6Imh0dHBzOi8vYXBwLm5lcHR1bmUuYWkiLCJhcGlfdXJsIjoiaHR0cHM6Ly9hcHAubmVwdHVuZS5haSIsImFwaV9rZXkiOiJlMmM5ZDE1Mi1jYTBmLTQzNjMtYWZiNy0zYmI1MjI1OGExMmUifQ==',
-    project='aniakettner/brain'
+    project='aniakettner/WMH'
 )
 
 trainer = pl.Trainer(
@@ -165,24 +200,28 @@ trainer = pl.Trainer(
     callbacks=[model_checkpoint],
     gpus=1,
 
-    max_epochs=15,
-    # resume_from_checkpoint="checkpoints/epoch=4-step=11084.ckpt"
+    max_epochs=max_epochs,
+    # resume_from_checkpoint="checkpoints/epoch=99-step=16599.ckpt"
 )
 
 trainer.fit(segmenter, train_dataloaders=train_loader, val_dataloaders=val_loader)
-# trainer.test(ckpt_path='checkpoints/epoch=4-step=11084.ckpt', test_dataloaders=test_loader)
+# trainer.test(ckpt_path='checkpoints/epoch=99-step=26399.ckpt', test_dataloaders=test_loader)
 
 
 with torch.no_grad():
-    image, mask = test_dataset[0]
+    image, mask = test_dataset[16]
     image = image.float()
     result = segmenter(image[None, ...])
     result[result < 0.5] = 0
     result[result != 0] = 1
 
-    plt.imshow(image.permute(1, 2, 0))
+    plt.imshow(image.permute(1, 2, 0), cmap='gray')
+    plt.imsave('brain8.png', image.squeeze(), cmap='gray')
     plt.figure()
-    plt.imshow(result.squeeze())
+    plt.imshow(result.squeeze(), cmap='gray')
+    plt.imsave('WMH8_epochs500_resnetZ.png', result.squeeze(), cmap='gray')
     plt.figure()
-    plt.imshow(mask.squeeze())
+    plt.imshow(mask.squeeze(), cmap='gray')
+    plt.imsave('mask8.png', mask.squeeze(), cmap='gray')
+
     plt.show()
